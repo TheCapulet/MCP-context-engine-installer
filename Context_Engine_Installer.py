@@ -1353,32 +1353,19 @@ class MainWindow(QMainWindow):
             
             for req in missing:
                 self.log(f"[*] Installing {req}...")
+                install_success = False
+                
                 if req == "npm":
-                    if self.install_npm():
-                        success.append("npm")
-                    else:
-                        failed.append("npm")
+                    install_success = self.install_npm()
                 elif req == "uv":
-                    if self.install_uv():
-                        success.append("uv")
-                    else:
-                        failed.append("uv")
-            
-            for req in success:
-                if self.check_tool_availability(req):
-                    try:
-                        result = subprocess.run(
-                            [req, "--version"] if req == "npm" else [req, "--version"],
-                            capture_output=True,
-                            text=True,
-                            timeout=10
-                        )
-                        version = result.stdout.strip() if result.stdout else "unknown"
-                        self.log(f"[+] {req} verified: {version}")
-                    except Exception as e:
-                        self.log(f"[+] {req} installed (verification pending restart)")
+                    install_success = self.install_uv()
+                
+                if install_success:
+                    success.append(req)
+                    self.log(f"[+] {req} installed successfully")
                 else:
                     failed.append(req)
+                    self.log(f"[!] Failed to install {req}")
             
             if success and not failed:
                 QMessageBox.information(self, "Success", f"Successfully installed: {', '.join(success)}")
@@ -1650,17 +1637,14 @@ class MainWindow(QMainWindow):
 
     def run_elevated(self, command, description):
         self.log(f"[*] Attempting elevated install: {description}")
+        self.log("[*] UAC prompt should appear...")
         try:
             if sys.platform == 'win32':
-                ps_script = f'''
-                Start-Process -FilePath "cmd.exe" -ArgumentList "/c {command}" -Verb RunAs -Wait -WindowStyle Hidden
-                '''
-                result = subprocess.run(
-                    ['powershell', '-Command', ps_script],
-                    capture_output=True,
-                    text=True
+                subprocess.Popen(
+                    ['powershell', '-Command', f'Start-Process', 'cmd.exe', '-ArgumentList', f'/c {command}', '-Verb', 'RunAs', '-Wait'],
+                    creationflags=subprocess.CREATE_NEW_CONSOLE
                 )
-                return result.returncode == 0
+                return True
             else:
                 return False
         except Exception as e:
@@ -1702,22 +1686,32 @@ class MainWindow(QMainWindow):
                 text=True,
                 timeout=300
             )
-            os.remove(msi_path)
             if result.returncode == 0 or result.returncode == 3010:
                 self.log("    [+] Node.js installed successfully!")
+                try:
+                    if os.path.exists(msi_path):
+                        os.remove(msi_path)
+                except:
+                    pass
                 return True
         except Exception as e:
             self.log(f"    [!] Install attempt 1 failed: {e}")
         
         self.log("    Running installer (attempt 2 - with elevation)...")
         if self.run_elevated(f'msiexec /i "{msi_path}" /quiet /norestart', "Node.js"):
+            self.log("    [+] Node.js installed successfully (elevated)!")
             try:
                 if os.path.exists(msi_path):
                     os.remove(msi_path)
-                self.log("    [+] Node.js installed successfully!")
-                return True
-            except Exception:
+            except:
                 pass
+            return True
+        
+        try:
+            if os.path.exists(msi_path):
+                os.remove(msi_path)
+        except:
+            pass
         
         self.log("[!] Node.js installation failed.")
         self.log(f"    Please install manually from: https://nodejs.org/")
