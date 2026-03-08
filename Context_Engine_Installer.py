@@ -3,11 +3,9 @@ import os
 import json
 import shutil
 import subprocess
-import urllib.request
 import re
 import copy
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from PyQt6.QtGui import QCloseEvent
 
@@ -206,25 +204,26 @@ SUPPORTED_CLIENTS = {
 CUSTOM_SERVERS_FILE = "custom_servers.json"
 CLIENT_PATHS_FILE = "client_paths.json"
 
-# Load custom servers if they exist
-if os.path.exists(CUSTOM_SERVERS_FILE):
-    try:
-        with open(CUSTOM_SERVERS_FILE, 'r') as f:
-            custom_servers = json.load(f)
-            for key, value in custom_servers.items():
-                AVAILABLE_SERVERS[key] = value
-    except Exception as e:
-        print(f"Warning: Could not load custom servers: {e}")
+def load_custom_files():
+    if os.path.exists(CUSTOM_SERVERS_FILE):
+        try:
+            with open(CUSTOM_SERVERS_FILE, 'r') as f:
+                custom_servers = json.load(f)
+                for key, value in custom_servers.items():
+                    AVAILABLE_SERVERS[key] = value
+        except Exception as e:
+            print(f"Warning: Could not load custom servers: {e}")
 
-# Load custom client paths if they exist
-if os.path.exists(CLIENT_PATHS_FILE):
-    try:
-        with open(CLIENT_PATHS_FILE, 'r') as f:
-            custom_clients = json.load(f)
-            for key, value in custom_clients.items():
-                SUPPORTED_CLIENTS[key] = value
-    except Exception as e:
-        print(f"Warning: Could not load custom client paths: {e}")
+    if os.path.exists(CLIENT_PATHS_FILE):
+        try:
+            with open(CLIENT_PATHS_FILE, 'r') as f:
+                custom_clients = json.load(f)
+                for key, value in custom_clients.items():
+                    SUPPORTED_CLIENTS[key] = value
+        except Exception as e:
+            print(f"Warning: Could not load custom client paths: {e}")
+
+load_custom_files()
 
 # ==========================================
 # 2. BACKGROUND WORKER
@@ -249,7 +248,7 @@ class InstallerWorker(QObject):
             expanded = p.replace("~", user_home)
             if os.path.exists(expanded):
                 return expanded
-        return path_list[0].replace("~", user_home)
+        return None
 
     def safe_load_json(self, file_path):
         if not os.path.exists(file_path):
@@ -265,28 +264,26 @@ class InstallerWorker(QObject):
             return None
 
     def check_server_status(self, server_id):
-        """Check if a server process is currently running"""
         try:
             if sys.platform == 'win32':
-                result = subprocess.run(['tasklist', '/fi', f'imagename eq node.exe', '/fi', f'imagename eq uv.exe'], 
-                                      capture_output=True, text=True)
-                return "Running" if result.returncode == 0 else "Stopped"
+                result = subprocess.run(['tasklist'], capture_output=True, text=True)
+                return "Running" if result.stdout.lower().strip() else "Stopped"
             else:
                 result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
-                processes = result.stdout.lower()
-                if 'npx' in processes or 'uvx' in processes:
-                    return "Running"
-                return "Stopped"
+                return "Running" if result.stdout.strip() else "Stopped"
         except Exception:
             return "Unknown"
 
     def run(self):
-        total_steps = len(self.clients) * 2 + len(self.clients)
+        total_steps = len(self.clients) * (2 + len(self.servers))
         current_step = 0
 
         for client_id, client_data in self.clients.items():
             self.log_signal.emit(f"\n[*] Processing Client: {client_data['name']}")
             target_path = self.get_actual_path(client_data["paths"])
+            if target_path is None:
+                self.error_signal.emit(f"    [!] No valid config path found for {client_data['name']}")
+                continue
             self.log_signal.emit(f"    Target File: {target_path}")
 
             try:
@@ -300,7 +297,7 @@ class InstallerWorker(QObject):
                 continue
 
             # Update server status
-            for srv_id in self.servers:
+            for srv_id in self.catalog:
                 status = self.check_server_status(srv_id)
                 self.server_status_signal.emit(srv_id, status)
 
@@ -316,16 +313,15 @@ class InstallerWorker(QObject):
             if "mcpServers" not in config_data:
                 config_data["mcpServers"] = {}
 
-            for srv_id in self.catalog:
-                if srv_id in config_data["mcpServers"] and srv_id not in self.servers:
+            for srv_id in list(config_data["mcpServers"].keys()):
+                if srv_id not in self.servers:
                     if not self.dry_run:
                         del config_data["mcpServers"][srv_id]
-                    self.log_signal.emit(f"    [-] Uninstalled: {srv_id}")
+                        self.log_signal.emit(f"    [-] Uninstalled: {srv_id}")
 
             for srv_id, srv_data in self.servers.items():
                 if not self.dry_run:
-                    srv_config = copy.deepcopy(srv_data["config"])
-                    config_data["mcpServers"][srv_id] = srv_config
+                    config_data["mcpServers"][srv_id] = copy.deepcopy(srv_data["config"])
                 self.log_signal.emit(f"    [+] Installed/Updated: {srv_id}")
 
             if not self.dry_run:
@@ -364,7 +360,11 @@ class PreviewDialog(QDialog):
         
         config = {"mcpServers": {}}
         for srv_id, srv_data in servers.items():
-            config["mcpServers"][srv_id] = srv_data["config"]
+            if srv_data.get("secure_prompt"):
+                srv_config = {"command": srv_data["config"]["command"], "args": srv_data["config"]["args"], "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "<TOKEN_PROMPTED>"}}
+            else:
+                srv_config = srv_data["config"]
+            config["mcpServers"][srv_id] = srv_config
         
         self.preview.setPlainText(json.dumps(config, indent=2))
         layout.addWidget(self.preview)
@@ -567,6 +567,9 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(btn_dry_run)
         right_layout.addWidget(btn_rollback)
         right_layout.addWidget(btn_check)
+        btn_install_deps = QPushButton("Install Missing Dependencies")
+        btn_install_deps.clicked.connect(self.install_missing_dependencies)
+        right_layout.addWidget(btn_install_deps)
         right_layout.addStretch()
         
         splitter.addWidget(right_panel)
@@ -595,10 +598,13 @@ class MainWindow(QMainWindow):
         self.log("System initialized. Select items and click Sync.")
 
     def filter_servers(self, text):
-        text = text.lower()
+        text_lower = text.lower()
         for k, cb in self.server_checkboxes.items():
+            if cb is None:
+                continue
             server_name = AVAILABLE_SERVERS[k]['name'].lower()
-            cb.setVisible(text in server_name)
+            server_details = AVAILABLE_SERVERS[k]['details'].lower()
+            cb.setVisible(text_lower in server_name or text_lower in server_details)
 
     def update_status(self, server_id, state):
         if state == Qt.CheckState.Checked.value:
@@ -607,19 +613,36 @@ class MainWindow(QMainWindow):
     def refresh_statuses(self):
         self.log("[*] Checking server statuses...")
         for k in self.server_checkboxes:
-            status = self.check_server_status(k)
+            status = self.check_server_status_full(k)
             if k in self.server_status:
                 self.server_status[k].setText(f"Status: {status}")
                 self.server_status[k].setStyleSheet("color: #2E8B57; font-size: 9px;" if status == "Running" else "color: #B22222; font-size: 9px;")
 
-    def check_server_status(self, server_id):
+    def check_server_status_full(self, server_id):
+        """Check if a server process is currently running"""
         try:
             if sys.platform == 'win32':
                 result = subprocess.run(['tasklist'], capture_output=True, text=True)
-                return "Running" if result.returncode == 0 else "Stopped"
+                processes = result.stdout.lower()
+                server_map = {
+                    'semantic-brain': 'node.exe',
+                    'memory-server': 'node.exe',
+                    'filesystem': 'node.exe',
+                    'fetch': 'node.exe',
+                    'puppeteer': 'node.exe',
+                    'github': 'node.exe',
+                    'structural-map': 'uv.exe',
+                    'sqlite': 'uv.exe'
+                }
+                if server_id in server_map:
+                    return "Running" if server_map[server_id] in processes else "Stopped"
+                return "Unknown"
             else:
                 result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
-                return "Running" if result.returncode == 0 else "Stopped"
+                processes = result.stdout.lower()
+                if 'npx' in processes or 'uvx' in processes:
+                    return "Running"
+                return "Stopped"
         except Exception:
             return "Unknown"
 
@@ -648,7 +671,7 @@ class MainWindow(QMainWindow):
         filename, _ = QFileDialog.getSaveFileName(self, "Export Settings", "", "JSON Files (*.json)")
         if filename:
             settings = {
-                "servers": [k for k, cb in self.server_checkboxes.items() if cb.isChecked()],
+                "servers": [k for k, cb in self.server_checkboxes.items() if cb is not None and cb.isChecked()],
                 "clients": [k for k, cb in self.client_checkboxes.items() if cb.isChecked()],
                 "timestamp": datetime.now().isoformat()
             }
@@ -664,7 +687,7 @@ class MainWindow(QMainWindow):
                     settings = json.load(f)
                 
                 for k, cb in self.server_checkboxes.items():
-                    if k in settings.get('servers', []):
+                    if cb is not None and k in settings.get('servers', []):
                         cb.setChecked(True)
                 
                 for k, cb in self.client_checkboxes.items():
@@ -676,7 +699,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Failed to import settings: {e}")
 
     def show_preview(self):
-        sel_servers = {k: AVAILABLE_SERVERS[k] for k, cb in self.server_checkboxes.items() if cb.isChecked()}
+        sel_servers = {k: AVAILABLE_SERVERS[k] for k, cb in self.server_checkboxes.items() if cb is not None and cb.isChecked()}
         if not sel_servers:
             QMessageBox.warning(self, "Warning", "No servers selected.")
             return
@@ -692,6 +715,42 @@ class MainWindow(QMainWindow):
                     if k in self.client_checkboxes:
                         self.client_checkboxes[k].setChecked(True)
                         self.log(f"    Found: {client_data['name']} at {expanded}")
+        for k in self.server_checkboxes:
+            if self.server_checkboxes[k] is not None:
+                status = self.check_server_status_full(k)
+                if k in self.server_status:
+                    color = "#2E8B57" if status == "Running" else "#B22222"
+                    self.server_status[k].setText(f"Status: {status}")
+                    self.server_status[k].setStyleSheet(f"color: {color}; font-size: 9px;")
+
+    def install_missing_dependencies(self):
+        self.log("[*] Checking for missing dependencies...")
+        sel_servers = {k: AVAILABLE_SERVERS[k] for k, cb in self.server_checkboxes.items() if cb is not None and cb.isChecked()}
+        reqs = set(s['req'] for s in sel_servers.values())
+        
+        missing = []
+        for req in reqs:
+            if not self.check_tool_availability(req):
+                missing.append(req)
+        
+        if not missing:
+            QMessageBox.information(self, "Dependencies", "All required tools are already installed.")
+            self.log("[+] All dependencies satisfied.")
+            return
+        
+        missing_str = '\n'.join(f"  - {r}" for r in missing)
+        msg = f"The following tools are required but not found in PATH:\n\n{missing_str}\n\nWould you like to prompt installation instructions?"
+        reply = QMessageBox.question(self, "Missing Dependencies", msg, 
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            for req in missing:
+                if req == "npm":
+                    self.log(f"[*] npm is required. Install from: https://nodejs.org/")
+                    self.log(f"[*] Verify installation: npm --version")
+                elif req == "uv":
+                    self.log(f"[*] uv is required. Install from: https://github.com/astral-sh/uv")
+                    self.log(f"[*] Verify installation: uv --version")
 
     def rollback_config(self):
         backups = []
@@ -700,11 +759,14 @@ class MainWindow(QMainWindow):
         for k, client_data in SUPPORTED_CLIENTS.items():
             for path in client_data['paths']:
                 expanded = path.replace("~", user_home)
-                backup_path = f"{expanded}.*.bak"
-                matching = [f for f in os.listdir(os.path.dirname(expanded)) 
-                           if f.startswith(os.path.basename(expanded) + '.') and f.endswith('.bak')]
+                config_basename = os.path.basename(expanded)
+                parent_dir = os.path.dirname(expanded)
+                if not os.path.exists(parent_dir):
+                    continue
+                matching = [f for f in os.listdir(parent_dir) 
+                           if f.startswith(config_basename + '.') and f.endswith('.bak')]
                 if matching:
-                    backups.extend([os.path.join(os.path.dirname(expanded), f) for f in matching])
+                    backups.extend([os.path.join(parent_dir, f) for f in matching])
         
         if not backups:
             QMessageBox.information(self, "Rollback", "No backup files found.")
@@ -715,7 +777,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(dialog)
         
         list_widget = QListWidget()
-        for b in backups:
+        for b in sorted(backups):
             list_widget.addItem(QListWidgetItem(b))
         
         layout.addWidget(list_widget)
@@ -757,7 +819,7 @@ class MainWindow(QMainWindow):
     def start_process(self, dry_run=False):
         self.console.clear()
         
-        sel_servers = {k: AVAILABLE_SERVERS[k] for k, cb in self.server_checkboxes.items() if cb.isChecked()}
+        sel_servers = {k: AVAILABLE_SERVERS[k] for k, cb in self.server_checkboxes.items() if cb is not None and cb.isChecked()}
         sel_clients = {k: SUPPORTED_CLIENTS[k] for k, cb in self.client_checkboxes.items() if cb.isChecked()}
 
         if not sel_clients:
@@ -772,16 +834,15 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Missing Prerequisites", msg)
             return
 
-        for k, s in sel_servers.items():
+        for k, s in list(sel_servers.items()):
             if s.get("secure_prompt"):
                 token = self.get_secure_input(f"Setup {s['name']}", f"Enter API Token for {s['name']}:")
                 if not token:
                     self.log(f"[!] Skipped {s['name']} (No token provided by user)")
-                    del sel_servers[k] 
+                    del sel_servers[k]
                 else:
                     s_config = copy.deepcopy(s["config"])
                     s_config["env"]["GITHUB_PERSONAL_ACCESS_TOKEN"] = token
-                    sel_servers[k] = copy.deepcopy(s)
                     sel_servers[k]["config"] = s_config
 
         self._thread = QThread()
@@ -805,7 +866,7 @@ class MainWindow(QMainWindow):
         self._thread.start()
 
     def update_server_status(self, server_id, status):
-        if server_id in self.server_status:
+        if server_id in self.server_status and self.server_status[server_id]:
             color = "#2E8B57" if status == "Running" else "#B22222"
             self.server_status[server_id].setText(f"Status: {status}")
             self.server_status[server_id].setStyleSheet(f"color: {color}; font-size: 9px;")
