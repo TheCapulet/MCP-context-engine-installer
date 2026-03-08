@@ -174,30 +174,119 @@ AVAILABLE_SERVERS = {
 SUPPORTED_CLIENTS = {
     "opencode": {
         "name": "OpenCode Desktop",
-        "paths": ["~/.config/opencode/opencode.json", "~/AppData/Roaming/opencode/config.json"]
+        "paths": ["~/.config/opencode/opencode.json", "~/AppData/Roaming/opencode/config.json"],
+        "skills_path": "~/.config/opencode/skills/"
     },
     "claude": {
         "name": "Claude Desktop",
-        "paths": ["~/AppData/Roaming/Claude/claude_desktop_config.json", "~/Library/Application Support/Claude/claude_desktop_config.json"]
+        "paths": ["~/AppData/Roaming/Claude/claude_desktop_config.json", "~/Library/Application Support/Claude/claude_desktop_config.json"],
+        "skills_path": "~/.claude/skills/"
     },
     "windsurf": {
         "name": "Windsurf IDE",
-        "paths": ["~/.codeium/windsurf/mcp_config.json"]
+        "paths": ["~/.codeium/windsurf/mcp_config.json"],
+        "skills_path": "~/.windsurf/skills/"
     },
     "continue_dev": {
         "name": "Continue.dev (VS Code / JetBrains)",
-        "paths": ["~/.continue/config.json"]
+        "paths": ["~/.continue/config.json"],
+        "skills_path": None
     },
     "roo_code": {
         "name": "Roo Code / Cline (VS Code)",
         "paths": [
             "~/AppData/Roaming/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/cline_mcp_settings.json",
             "~/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/cline_mcp_settings.json"
-        ]
+        ],
+        "skills_path": "~/.cline/skills/"
     },
     "zed": {
         "name": "Zed Editor",
-        "paths": ["~/.config/zed/mcp.json", "~/AppData/Local/Zed/mcp.json"] 
+        "paths": ["~/.config/zed/mcp.json", "~/AppData/Local/Zed/mcp.json"],
+        "skills_path": None
+    }
+}
+
+AVAILABLE_SKILLS = {
+    "ui-ux-pro-max": {
+        "name": "UI/UX Pro Max",
+        "description": "Frontend UI/UX with searchable palettes, typography, and stack guidelines for React, Next.js, Vue, Tailwind, etc.",
+        "repo": "jmerta/codex-skills",
+        "folder": "ui-ux-pro-max",
+        "details": (
+            "<b>Category:</b> Frontend Design<br>"
+            "<b>Use for:</b> Creating stunning UI/UX with searchable style databases, color palettes, font pairings, and component guidelines."
+        )
+    },
+    "frontend-ui-ux": {
+        "name": "Frontend UI/UX",
+        "description": "Designer-turned-developer for creating stunning UI without design mockups. Focuses on spacing, color harmony, and micro-interactions.",
+        "repo": "code-yeongyu/oh-my-opencode",
+        "folder": "src/features/builtin-skills/frontend-ui-ux",
+        "details": (
+            "<b>Category:</b> Frontend Design<br>"
+            "<b>Use for:</b> Pixel-perfect interfaces, smooth animations, and intuitive interactions without mockups."
+        )
+    },
+    "fastapi": {
+        "name": "FastAPI Backend",
+        "description": "Production-ready FastAPI services with asyncio, proper validation, and efficient dependency patterns.",
+        "repo": "openclaw/skills",
+        "folder": "fastapi",
+        "details": (
+            "<b>Category:</b> Python Backend<br>"
+            "<b>Use for:</b> Building scalable APIs with FastAPI, Pydantic validation, and async patterns."
+        )
+    },
+    "python-testing-patterns": {
+        "name": "Python Testing Patterns",
+        "description": "Robust pytest testing with fixtures, mocks, and best practices for reliable unit and integration tests.",
+        "repo": "nickcrew/claude-cortex",
+        "folder": "python-testing-patterns",
+        "details": (
+            "<b>Category:</b> Testing<br>"
+            "<b>Use for:</b> Writing maintainable pytest tests with proper fixtures, mocking, and edge case coverage."
+        )
+    },
+    "git": {
+        "name": "Git Version Control",
+        "description": "Full version control with branching strategies, collaboration workflows, and conflict resolution.",
+        "repo": "openclaw/skills",
+        "folder": "git",
+        "details": (
+            "<b>Category:</b> DevOps<br>"
+            "<b>Use for:</b> Git workflows, atomic commits, branch management, and collaboration."
+        )
+    },
+    "security-review": {
+        "name": "Security Review",
+        "description": "Comprehensive security analysis detecting OWASP issues, hardcoded secrets, and insecure coding patterns.",
+        "repo": "yeachan-heo/oh-my-claudecode",
+        "folder": "security-review",
+        "details": (
+            "<b>Category:</b> Security<br>"
+            "<b>Use for:</b> Security audits, vulnerability detection, and secure coding best practices."
+        )
+    },
+    "databases": {
+        "name": "Database Design",
+        "description": "Design schemas, optimize queries, and manage migrations for MongoDB and PostgreSQL.",
+        "repo": "mamba-mental/agent-skill-manager",
+        "folder": "databases",
+        "details": (
+            "<b>Category:</b> Database<br>"
+            "<b>Use for:</b> Database schema design, query optimization, and migration management."
+        )
+    },
+    "docker-compose-generator": {
+        "name": "Docker Compose Generator",
+        "description": "Generate ready-to-use docker-compose.yml for common services like MySQL, Redis, MongoDB, and more.",
+        "repo": "openclaw/skills",
+        "folder": "docker-compose-generator",
+        "details": (
+            "<b>Category:</b> DevOps<br>"
+            "<b>Use for:</b> Quick local development environments with Docker Compose."
+        )
     }
 }
 
@@ -418,6 +507,139 @@ class CustomServerDialog(QDialog):
         }
 
 
+class SkillsManager:
+    """Manages downloading and installing skills for various AI clients"""
+    
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback
+        self.temp_dir = None
+        self.cloned_repos = {}
+    
+    def log(self, msg):
+        if self.log_callback:
+            self.log_callback(msg)
+        print(msg)
+    
+    def get_skills_path(self, client_id):
+        """Get the skills folder path for a specific client"""
+        client = SUPPORTED_CLIENTS.get(client_id)
+        if not client:
+            return None
+        skills_path = client.get('skills_path')
+        if not skills_path:
+            return None
+        return os.path.expanduser(skills_path)
+    
+    def clone_repo(self, repo_url):
+        """Clone a GitHub repository to temp directory (cached)"""
+        if repo_url in self.cloned_repos:
+            self.log(f"[*] Using cached repo: {repo_url}")
+            return self.cloned_repos[repo_url]
+        
+        import tempfile
+        import urllib.request
+        
+        self.log(f"[*] Cloning repository: {repo_url}")
+        
+        temp_dir = tempfile.mkdtemp()
+        repo_name = repo_url.split('/')[-1]
+        repo_path = os.path.join(temp_dir, repo_name)
+        
+        git_url = f"https://github.com/{repo_url}.git"
+        
+        try:
+            result = subprocess.run(
+                ['git', 'clone', '--depth', '1', git_url, repo_path],
+                capture_output=True,
+                text=True,
+                timeout=180
+            )
+            
+            if result.returncode == 0:
+                self.cloned_repos[repo_url] = repo_path
+                self.log(f"[+] Successfully cloned {repo_url}")
+                return repo_path
+            else:
+                self.log(f"[!] Failed to clone {repo_url}: {result.stderr}")
+                return None
+        except Exception as e:
+            self.log(f"[!] Error cloning {repo_url}: {e}")
+            return None
+    
+    def install_skill(self, skill_id, client_id):
+        """Install a single skill for a specific client"""
+        skill = AVAILABLE_SKILLS.get(skill_id)
+        if not skill:
+            self.log(f"[!] Skill not found: {skill_id}")
+            return False
+        
+        skills_path = self.get_skills_path(client_id)
+        if not skills_path:
+            self.log(f"[!] Skills not supported for client: {client_id}")
+            return False
+        
+        repo_url = skill['repo']
+        folder_name = skill['folder']
+        
+        repo_path = self.clone_repo(repo_url)
+        if not repo_path:
+            return False
+        
+        source_skill_path = os.path.join(repo_path, folder_name)
+        if not os.path.exists(source_skill_path):
+            self.log(f"[!] Skill folder not found: {source_skill_path}")
+            return False
+        
+        dest_skill_path = os.path.join(skills_path, skill_id)
+        
+        try:
+            os.makedirs(skills_path, exist_ok=True)
+            
+            if os.path.exists(dest_skill_path):
+                self.log(f"[*] Skill already exists at {dest_skill_path}, skipping")
+                return True
+            
+            shutil.copytree(source_skill_path, dest_skill_path)
+            self.log(f"[+] Installed {skill['name']} to {skills_path}")
+            return True
+        except Exception as e:
+            self.log(f"[!] Failed to install skill: {e}")
+            return False
+    
+    def install_skills(self, selected_skills, selected_clients):
+        """Install multiple skills for multiple clients"""
+        results = {}
+        
+        for client_id in selected_clients:
+            client_name = SUPPORTED_CLIENTS.get(client_id, {}).get('name', client_id)
+            self.log(f"\n[*] Installing skills for {client_name}...")
+            
+            skills_path = self.get_skills_path(client_id)
+            if not skills_path:
+                self.log(f"[!] Skills not supported for {client_name}, skipping")
+                continue
+            
+            client_results = {}
+            for skill_id in selected_skills:
+                skill_name = AVAILABLE_SKILLS.get(skill_id, {}).get('name', skill_id)
+                success = self.install_skill(skill_id, client_id)
+                client_results[skill_id] = success
+            
+            results[client_id] = client_results
+        
+        return results
+    
+    def cleanup(self):
+        """Clean up temporary cloned repositories"""
+        for repo_path in self.cloned_repos.values():
+            try:
+                if os.path.exists(repo_path):
+                    shutil.rmtree(repo_path)
+            except Exception as e:
+                self.log(f"[!] Error cleaning up {repo_path}: {e}")
+        self.cloned_repos = {}
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -550,6 +772,44 @@ class MainWindow(QMainWindow):
         grp_cli.setLayout(v_cli)
         right_layout.addWidget(grp_cli)
         
+        grp_skills = QGroupBox("3. Select Skills (Optional)")
+        grp_skills.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        v_skills = QVBoxLayout()
+        
+        scroll_skills = QScrollArea()
+        scroll_skills.setWidgetResizable(True)
+        scroll_skills.setFrameShape(QFrame.Shape.NoFrame)
+        
+        wid_skills = QWidget()
+        lay_skills = QVBoxLayout(wid_skills)
+        lay_skills.setSpacing(8)
+        
+        self.skill_checkboxes = {}
+        
+        for k, v in AVAILABLE_SKILLS.items():
+            box = QGroupBox()
+            box.setStyleSheet("QGroupBox { border: 1px solid #444; border-radius: 5px; margin-top: 5px; }")
+            box_l = QVBoxLayout()
+            
+            cb = QCheckBox(f"{v['name']}")
+            cb.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+            self.skill_checkboxes[k] = cb
+            
+            desc = QLabel(v['description'])
+            desc.setWordWrap(True)
+            desc.setStyleSheet("color: #AAA; font-size: 9px; margin-left: 20px;")
+            
+            box_l.addWidget(cb)
+            box_l.addWidget(desc)
+            box.setLayout(box_l)
+            lay_skills.addWidget(box)
+        
+        lay_skills.addStretch()
+        scroll_skills.setWidget(wid_skills)
+        v_skills.addWidget(scroll_skills)
+        grp_skills.setLayout(v_skills)
+        right_layout.addWidget(grp_skills)
+        
         # Buttons
         btn_preview = QPushButton("Preview Configuration")
         btn_preview.clicked.connect(self.show_preview)
@@ -570,6 +830,12 @@ class MainWindow(QMainWindow):
         btn_install_deps = QPushButton("Install Missing Dependencies")
         btn_install_deps.clicked.connect(self.install_missing_dependencies)
         right_layout.addWidget(btn_install_deps)
+        
+        btn_install_skills = QPushButton("Install Selected Skills")
+        btn_install_skills.setStyleSheet("background-color: #28a745; color: white;")
+        btn_install_skills.clicked.connect(self.install_skills)
+        right_layout.addWidget(btn_install_skills)
+        
         right_layout.addStretch()
         
         splitter.addWidget(right_panel)
@@ -728,6 +994,10 @@ class MainWindow(QMainWindow):
         sel_servers = {k: AVAILABLE_SERVERS[k] for k, cb in self.server_checkboxes.items() if cb is not None and cb.isChecked()}
         reqs = set(s['req'] for s in sel_servers.values())
         
+        if not reqs:
+            self.log("[*] No servers selected. Checking for all common tools (npm, uv)...")
+            reqs = {"npm", "uv"}
+        
         missing = []
         for req in reqs:
             if not self.check_tool_availability(req):
@@ -739,18 +1009,126 @@ class MainWindow(QMainWindow):
             return
         
         missing_str = '\n'.join(f"  - {r}" for r in missing)
-        msg = f"The following tools are required but not found in PATH:\n\n{missing_str}\n\nWould you like to prompt installation instructions?"
+        msg = f"The following tools are required but not found in PATH:\n\n{missing_str}\n\nWould you like to attempt automatic installation?"
         reply = QMessageBox.question(self, "Missing Dependencies", msg, 
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         
         if reply == QMessageBox.StandardButton.Yes:
+            success = []
+            failed = []
+            
             for req in missing:
+                self.log(f"[*] Installing {req}...")
                 if req == "npm":
-                    self.log(f"[*] npm is required. Install from: https://nodejs.org/")
-                    self.log(f"[*] Verify installation: npm --version")
+                    if self.install_npm():
+                        success.append("npm")
+                    else:
+                        failed.append("npm")
                 elif req == "uv":
-                    self.log(f"[*] uv is required. Install from: https://github.com/astral-sh/uv")
-                    self.log(f"[*] Verify installation: uv --version")
+                    if self.install_uv():
+                        success.append("uv")
+                    else:
+                        failed.append("uv")
+            
+            for req in success:
+                if self.check_tool_availability(req):
+                    try:
+                        result = subprocess.run(
+                            [req, "--version"] if req == "npm" else [req, "--version"],
+                            capture_output=True,
+                            text=True,
+                            timeout=10
+                        )
+                        version = result.stdout.strip() if result.stdout else "unknown"
+                        self.log(f"[+] {req} verified: {version}")
+                    except Exception as e:
+                        self.log(f"[+] {req} installed (verification pending restart)")
+                else:
+                    failed.append(req)
+            
+            if success and not failed:
+                QMessageBox.information(self, "Success", f"Successfully installed: {', '.join(success)}")
+            elif success and failed:
+                QMessageBox.warning(self, "Partial Success", 
+                    f"Installed: {', '.join(success)}\nFailed: {', '.join(failed)}")
+            else:
+                QMessageBox.critical(self, "Installation Failed", 
+                    f"Could not install: {', '.join(failed)}\n\nPlease install manually.")
+
+    def install_skills(self):
+        sel_clients = [k for k, cb in self.client_checkboxes.items() if cb.isChecked()]
+        sel_skills = [k for k, cb in self.skill_checkboxes.items() if cb.isChecked()]
+        
+        if not sel_clients:
+            QMessageBox.warning(self, "No Clients Selected", "Please select at least one target client software.")
+            return
+        
+        if not sel_skills:
+            QMessageBox.information(self, "No Skills Selected", "Please select at least one skill to install.")
+            return
+        
+        unsupported = []
+        for client_id in sel_clients:
+            client = SUPPORTED_CLIENTS.get(client_id, {})
+            if not client.get('skills_path'):
+                unsupported.append(client.get('name', client_id))
+        
+        if unsupported:
+            msg = f"The following clients do not support skills:\n\n{', '.join(unsupported)}\n\nSkills will only be installed for supported clients."
+            reply = QMessageBox.question(self, "Unsupported Clients", msg,
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            
+            sel_clients = [c for c in sel_clients if SUPPORTED_CLIENTS[c].get('skills_path')]
+        
+        if not sel_clients:
+            QMessageBox.information(self, "No Supported Clients", "None of the selected clients support skills installation.")
+            return
+        
+        skill_names = [AVAILABLE_SKILLS[s]['name'] for s in sel_skills]
+        client_names = [SUPPORTED_CLIENTS[c]['name'] for c in sel_clients]
+        
+        msg = f"Install {len(sel_skills)} skill(s) for {len(sel_clients)} client(s)?\n\nSkills: {', '.join(skill_names)}\n\nClients: {', '.join(client_names)}"
+        reply = QMessageBox.question(self, "Install Skills", msg,
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        self.log("[*] Starting skills installation...")
+        
+        skills_manager = SkillsManager(log_callback=self.log)
+        
+        try:
+            results = skills_manager.install_skills(sel_skills, sel_clients)
+            
+            total_success = 0
+            total_failed = 0
+            
+            for client_id, client_results in results.items():
+                client_name = SUPPORTED_CLIENTS.get(client_id, {}).get('name', client_id)
+                for skill_id, success in client_results.items():
+                    if success:
+                        total_success += 1
+                    else:
+                        total_failed += 1
+            
+            if total_success > 0 and total_failed == 0:
+                QMessageBox.information(self, "Success", 
+                    f"Successfully installed {total_success} skill(s)")
+            elif total_success > 0 and total_failed > 0:
+                QMessageBox.warning(self, "Partial Success",
+                    f"Installed: {total_success} skill(s)\nFailed: {total_failed} skill(s)")
+            else:
+                QMessageBox.critical(self, "Installation Failed",
+                    "Could not install any skills. Check the console for details.")
+                    
+        except Exception as e:
+            self.log(f"[!] Error during installation: {e}")
+            QMessageBox.critical(self, "Error", f"An error occurred: {e}")
+        finally:
+            skills_manager.cleanup()
 
     def rollback_config(self):
         backups = []
@@ -810,6 +1188,149 @@ class MainWindow(QMainWindow):
             return shutil.which("npm") is not None
         if tool_name == "uv":
             return shutil.which("uv") is not None
+        return False
+
+    def run_elevated(self, command, description):
+        self.log(f"[*] Attempting elevated install: {description}")
+        try:
+            if sys.platform == 'win32':
+                ps_script = f'''
+                Start-Process -FilePath "cmd.exe" -ArgumentList "/c {command}" -Verb RunAs -Wait -WindowStyle Hidden
+                '''
+                result = subprocess.run(
+                    ['powershell', '-Command', ps_script],
+                    capture_output=True,
+                    text=True
+                )
+                return result.returncode == 0
+            else:
+                return False
+        except Exception as e:
+            self.log(f"[!] Elevation failed: {e}")
+            return False
+
+    def install_npm(self):
+        self.log("[*] Installing Node.js (npm)...")
+        
+        if not sys.platform == 'win32':
+            self.log("[!] Automatic npm/Node.js installation is only supported on Windows.")
+            return False
+        
+        try:
+            import urllib.request
+            import tempfile
+        except ImportError:
+            self.log("[!] urllib not available")
+            return False
+        
+        temp_dir = tempfile.gettempdir()
+        msi_path = os.path.join(temp_dir, "node-installer.msi")
+        url = "https://nodejs.org/dist/v22.12.0/node-v22.12.0-x64.msi"
+        
+        try:
+            self.log(f"    Downloading Node.js from {url}...")
+            urllib.request.urlretrieve(url, msi_path)
+            self.log(f"    Downloaded to {msi_path}")
+        except Exception as e:
+            self.log(f"[!] Download failed: {e}")
+            self.log(f"    Manual install: https://nodejs.org/")
+            return False
+        
+        self.log("    Running installer (attempt 1 - without elevation)...")
+        try:
+            result = subprocess.run(
+                ['msiexec', '/i', msi_path, '/quiet', '/norestart'],
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+            os.remove(msi_path)
+            if result.returncode == 0 or result.returncode == 3010:
+                self.log("    [+] Node.js installed successfully!")
+                return True
+        except Exception as e:
+            self.log(f"    [!] Install attempt 1 failed: {e}")
+        
+        self.log("    Running installer (attempt 2 - with elevation)...")
+        if self.run_elevated(f'msiexec /i "{msi_path}" /quiet /norestart', "Node.js"):
+            try:
+                if os.path.exists(msi_path):
+                    os.remove(msi_path)
+                self.log("    [+] Node.js installed successfully!")
+                return True
+            except Exception:
+                pass
+        
+        self.log("[!] Node.js installation failed.")
+        self.log(f"    Please install manually from: https://nodejs.org/")
+        return False
+
+    def install_uv(self):
+        self.log("[*] Installing uv...")
+        python_exe = sys.executable
+        
+        self.log("    Attempt 1: pip install uv")
+        try:
+            result = subprocess.run(
+                [python_exe, "-m", "pip", "install", "uv"],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            if result.returncode == 0:
+                self.log("    [+] uv installed via pip!")
+                return True
+            self.log(f"    pip install failed: {result.stderr}")
+        except Exception as e:
+            self.log(f"    [!] pip install failed: {e}")
+        
+        self.log("    Attempt 2: pip install uv (with elevation)")
+        if self.run_elevated(f'"{python_exe}" -m pip install uv', "uv via pip"):
+            try:
+                result = subprocess.run(
+                    [python_exe, "-m", "pip", "show", "uv"],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    self.log("    [+] uv installed via pip (elevated)!")
+                    return True
+            except Exception:
+                pass
+        
+        self.log("    Attempt 3: curl install script")
+        try:
+            curl_cmd = 'powershell -Command "irm https://astral.sh/uv/install.ps1 | iex"'
+            result = subprocess.run(
+                curl_cmd,
+                capture_output=True,
+                text=True,
+                shell=True,
+                timeout=120
+            )
+            if result.returncode == 0:
+                self.log("    [+] uv installed via curl script!")
+                return True
+            self.log(f"    curl install failed: {result.stderr}")
+        except Exception as e:
+            self.log(f"    [!] curl install failed: {e}")
+        
+        self.log("    Attempt 4: curl install (with elevation)")
+        if self.run_elevated('powershell -Command "irm https://astral.sh/uv/install.ps1 | iex"', "uv via curl"):
+            try:
+                result = subprocess.run(
+                    [python_exe, "-m", "pip", "show", "uv"],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    self.log("    [+] uv installed via curl (elevated)!")
+                    return True
+            except Exception:
+                pass
+        
+        self.log("[!] uv installation failed.")
+        self.log(f"    Please install manually from: https://github.com/astral-sh/uv")
         return False
 
     def get_secure_input(self, title, label):
