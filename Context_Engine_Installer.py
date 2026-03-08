@@ -7,7 +7,7 @@ import re
 import copy
 from datetime import datetime
 
-from PyQt6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent
 
 try:
     import requests
@@ -20,21 +20,21 @@ except ImportError:
 # ==========================================
 def ensure_dependencies():
     """
-    Checks for PyQt6. 
+    Checks for PySide6. 
     SECURITY: Asks for explicit user consent before installing anything via pip.
     """
     try:
-        import PyQt6
+        import PySide6
         return
     except ImportError:
         pass
 
     print("\n" + "!"*60)
-    print("MISSING DEPENDENCY: PyQt6")
-    print("This script requires the PyQt6 GUI library to render the interface.")
+    print("MISSING DEPENDENCY: PySide6")
+    print("This script requires the PySide6 GUI library to render the interface.")
     print("!"*60)
     
-    response = input("Do you want to install PyQt6 via pip now? (y/n): ").strip().lower()
+    response = input("Do you want to install PySide6 via pip now? (y/n): ").strip().lower()
     if response != 'y':
         print("[!] User aborted. Exiting.")
         sys.exit(0)
@@ -57,8 +57,8 @@ def ensure_dependencies():
             print(f"[!] Execution Exception: {e}")
             return False
 
-    print("[*] Installing PyQt6...")
-    if run_pip_cmd(["install", "PyQt6"]):
+    print("[*] Installing PySide6...")
+    if run_pip_cmd(["install", "PySide6"]):
         print("[+] Installation success. Launching UI...")
     else:
         print("[!] Installation failed. Please check the logs above.")
@@ -69,15 +69,15 @@ ensure_dependencies()
 # ==========================================
 # IMPORTS
 # ==========================================
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGroupBox, QCheckBox, QPushButton, QTextEdit, QMessageBox, QLabel, 
     QScrollArea, QFrame, QInputDialog, QLineEdit, QProgressBar, QTabWidget,
     QComboBox, QFileDialog, QDialog, QFormLayout, QDialogButtonBox,
     QSplitter, QListWidget, QListWidgetItem
 )
-from PyQt6.QtGui import QFont, QTextCursor, QPalette, QColor, QAction, QKeySequence
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QCoreApplication, QTimer
+from PySide6.QtGui import QFont, QTextCursor, QPalette, QColor, QAction, QKeySequence
+from PySide6.QtCore import Qt, QThread, Signal as pyqtSignal, QObject, QCoreApplication, QTimer
 
 # ==========================================
 # 1. CATALOGS
@@ -323,6 +323,9 @@ class InstallerWorker(QObject):
     finished_signal = pyqtSignal()
     error_signal = pyqtSignal(str)
     server_status_signal = pyqtSignal(str, str)
+    
+    # Alias for backward compatibility
+    signal = pyqtSignal
 
     def __init__(self, servers_to_install, clients_to_target, catalog, dry_run=False):
         super().__init__()
@@ -873,7 +876,7 @@ class MainWindow(QMainWindow):
             cb.setVisible(text_lower in server_name or text_lower in server_details)
 
     def update_status(self, server_id, state):
-        if state == Qt.CheckState.Checked.value:
+        if state == Qt.CheckState.Checked:
             self.console.append(f"[Info] Selected: {AVAILABLE_SERVERS[server_id]['name']}")
 
     def refresh_statuses(self):
