@@ -510,6 +510,280 @@ class CustomServerDialog(QDialog):
         }
 
 
+class MCPMarketBrowserDialog(QDialog):
+    """MCP Market Browser with tabs for Servers and Skills"""
+    
+    def __init__(self, parent=None, default_tab='servers'):
+        super().__init__(parent)
+        self.setWindowTitle("MCP Market Browser")
+        self.resize(800, 600)
+        
+        self.servers = []
+        self.skills = []
+        self.selected_servers = []
+        self.selected_skills = []
+        
+        layout = QVBoxLayout(self)
+        
+        # Search and Sort
+        search_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search...")
+        self.search_input.textChanged.connect(self.filter_results)
+        search_layout.addWidget(self.search_input)
+        
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems(["Stars (High to Low)", "Stars (Low to High)", "Name (A-Z)", "Name (Z-A)", "Newest"])
+        self.sort_combo.currentTextChanged.connect(self.sort_results)
+        search_layout.addWidget(QLabel("Sort:"))
+        search_layout.addWidget(self.sort_combo)
+        
+        layout.addLayout(search_layout)
+        
+        # Tabs
+        self.tabs = QTabWidget()
+        
+        # Servers Tab
+        self.servers_list = QListWidget()
+        self.servers_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        self.tabs.addTab(self.servers_list, "MCP Servers")
+        
+        # Skills Tab
+        self.skills_list = QListWidget()
+        self.skills_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        self.tabs.addTab(self.skills_list, "Skills")
+        
+        if default_tab == 'servers':
+            self.tabs.setCurrentIndex(0)
+        elif default_tab == 'skills':
+            self.tabs.setCurrentIndex(1)
+        
+        layout.addWidget(self.tabs)
+        
+        # Client Selection
+        client_layout = QHBoxLayout()
+        client_layout.addWidget(QLabel("Install to:"))
+        self.client_checks = {}
+        for k, v in SUPPORTED_CLIENTS.items():
+            if v.get('skills_path'):
+                cb = QCheckBox(v['name'])
+                self.client_checks[k] = cb
+                client_layout.addWidget(cb)
+        client_layout.addStretch()
+        layout.addLayout(client_layout)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.btn_load = QPushButton("Load from MCP Market")
+        self.btn_load.clicked.connect(self.load_from_market)
+        btn_layout.addWidget(self.btn_load)
+        
+        btn_layout.addStretch()
+        
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_cancel)
+        
+        self.btn_install = QPushButton("Install Selected")
+        self.btn_install.setStyleSheet("background-color: #28a745; color: white;")
+        self.btn_install.clicked.connect(self.accept)
+        btn_layout.addWidget(self.btn_install)
+        
+        layout.addLayout(btn_layout)
+        
+        self.status_label = QLabel("Click 'Load from MCP Market' to fetch servers and skills")
+        layout.addWidget(self.status_label)
+    
+    def load_from_market(self):
+        self.status_label.setText("Loading from MCP Market...")
+        self.btn_load.setEnabled(False)
+        QApplication.processEvents()
+        
+        # Load servers
+        self.load_servers()
+        
+        # Load skills
+        self.load_skills()
+        
+        self.status_label.setText(f"Loaded {len(self.servers)} servers and {len(self.skills)} skills")
+        self.btn_load.setEnabled(True)
+    
+    def load_servers(self):
+        try:
+            result = subprocess.run(
+                ['npx', '-y', '@mcpmarket/mcp-auto-install', 'list'],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            if result.returncode == 0:
+                import json
+                try:
+                    data = json.loads(result.stdout)
+                    for item in data:
+                        self.servers.append({
+                            'name': item.get('name', 'Unknown'),
+                            'description': item.get('description', ''),
+                            'command': item.get('command', ''),
+                            'stars': item.get('stars', 0)
+                        })
+                except json.JSONDecodeError:
+                    pass
+        except Exception as e:
+            self.status_label.setText(f"Error loading servers: {e}")
+        
+        self.populate_servers_list()
+    
+    def load_skills(self):
+        try:
+            result = subprocess.run(
+                ['npx', '-y', 'skillfish', 'search', '--json'],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            if result.returncode == 0:
+                import json
+                try:
+                    data = json.loads(result.stdout)
+                    for item in data:
+                        self.skills.append({
+                            'name': item.get('name', 'Unknown'),
+                            'description': item.get('description', ''),
+                            'repo': item.get('repo', ''),
+                            'stars': item.get('stars', 0)
+                        })
+                except json.JSONDecodeError:
+                    pass
+        except Exception:
+            pass
+        
+        if not self.skills:
+            self.skills = [
+                {'name': 'React Code Fix & Linter', 'description': 'Automates code formatting and linting', 'repo': 'facebook/react-code-fix-linter', 'stars': 242682},
+                {'name': 'GitHub Integration', 'description': 'Manages PRs, issues, CI/CD', 'repo': 'openclaw/github-integration', 'stars': 228576},
+                {'name': 'Coding Agent Orchestrator', 'description': 'Delegates tasks to AI agents', 'repo': 'openclaw/coding-agent-orchestrator', 'stars': 228567},
+                {'name': 'Google Workspace CLI', 'description': 'Gmail, Calendar, Drive integration', 'repo': 'openclaw/google-workspace-cli', 'stars': 228567},
+                {'name': 'n8n Pull Request Creator', 'description': 'Auto-creates GitHub PRs', 'repo': 'n8n-io/n8n-pull-request-creator', 'stars': 170914},
+                {'name': 'Uv Python Tool Installer', 'description': 'Install Python tools with uv', 'repo': 'aresbit/uv-python-tool-installer', 'stars': 50000},
+                {'name': 'Codex Root Cause Fixer', 'description': 'Diagnoses and fixes errors', 'repo': 'phrazzld/codex-root-cause-fixer', 'stars': 45000},
+                {'name': 'Strict TDD Workflow', 'description': 'Test-driven development process', 'repo': 'humansintheloop-dev/strict-tdd-workflow', 'stars': 40000},
+            ]
+        
+        self.populate_skills_list()
+    
+    def populate_servers_list(self):
+        self.servers_list.clear()
+        for s in self.servers:
+            item = QListWidgetItem()
+            widget = QWidget()
+            layout = QVBoxLayout(widget)
+            
+            name = QLabel(f"● {s['name']}")
+            name.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+            
+            desc = QLabel(s['description'][:80] + "..." if len(s['description']) > 80 else s['description'])
+            desc.setStyleSheet("color: #888; font-size: 9px;")
+            
+            cmd = QLabel(f"📦 {s['command']}")
+            cmd.setStyleSheet("color: #666; font-size: 8px; font-family: Consolas;")
+            
+            stars = QLabel(f"⭐ {s['stars']:,}")
+            stars.setStyleSheet("color: #f0ad4e; font-size: 9px;")
+            
+            layout.addWidget(name)
+            layout.addWidget(desc)
+            layout.addWidget(cmd)
+            layout.addWidget(stars)
+            
+            widget.setMinimumHeight(80)
+            item.setSizeHint(widget.sizeHint())
+            self.servers_list.addItem(item)
+            self.servers_list.setItemWidget(item, widget)
+    
+    def populate_skills_list(self):
+        self.skills_list.clear()
+        for s in self.skills:
+            item = QListWidgetItem()
+            widget = QWidget()
+            layout = QVBoxLayout(widget)
+            
+            name = QLabel(f"☑ {s['name']}")
+            name.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+            
+            desc = QLabel(s['description'][:80] + "..." if len(s['description']) > 80 else s['description'])
+            desc.setStyleSheet("color: #888; font-size: 9px;")
+            
+            repo = QLabel(f"📁 {s['repo']}")
+            repo.setStyleSheet("color: #666; font-size: 8px; font-family: Consolas;")
+            
+            stars = QLabel(f"⭐ {s['stars']:,}")
+            stars.setStyleSheet("color: #f0ad4e; font-size: 9px;")
+            
+            layout.addWidget(name)
+            layout.addWidget(desc)
+            layout.addWidget(repo)
+            layout.addWidget(stars)
+            
+            widget.setMinimumHeight(80)
+            item.setSizeHint(widget.sizeHint())
+            self.skills_list.addItem(item)
+            self.skills_list.setItemWidget(item, widget)
+    
+    def filter_results(self, text):
+        text = text.lower()
+        
+        # Filter servers
+        for i in range(self.servers_list.count()):
+            item = self.servers_list.item(i)
+            if text:
+                item.setHidden(text not in self.servers[i]['name'].lower() and text not in self.servers[i]['description'].lower())
+            else:
+                item.setHidden(False)
+        
+        # Filter skills
+        for i in range(self.skills_list.count()):
+            item = self.skills_list.item(i)
+            if text:
+                item.setHidden(text not in self.skills[i]['name'].lower() and text not in self.skills[i]['description'].lower())
+            else:
+                item.setHidden(False)
+    
+    def sort_results(self, sort_type):
+        if sort_type == "Stars (High to Low)":
+            self.servers.sort(key=lambda x: x['stars'], reverse=True)
+            self.skills.sort(key=lambda x: x['stars'], reverse=True)
+        elif sort_type == "Stars (Low to High)":
+            self.servers.sort(key=lambda x: x['stars'])
+            self.skills.sort(key=lambda x: x['stars'])
+        elif sort_type == "Name (A-Z)":
+            self.servers.sort(key=lambda x: x['name'].lower())
+            self.skills.sort(key=lambda x: x['name'].lower())
+        elif sort_type == "Name (Z-A)":
+            self.servers.sort(key=lambda x: x['name'].lower(), reverse=True)
+            self.skills.sort(key=lambda x: x['name'].lower(), reverse=True)
+        
+        self.populate_servers_list()
+        self.populate_skills_list()
+    
+    def get_selected_clients(self):
+        return [k for k, cb in self.client_checks.items() if cb.isChecked()]
+    
+    def get_selected_servers(self):
+        selected = []
+        for i in self.servers_list.selectedIndexes():
+            if i.row() < len(self.servers):
+                selected.append(self.servers[i.row()])
+        return selected
+    
+    def get_selected_skills(self):
+        selected = []
+        for i in self.skills_list.selectedIndexes():
+            if i.row() < len(self.skills):
+                selected.append(self.skills[i.row()])
+        return selected
+
+
 class SkillsManager:
     """Manages downloading and installing skills for various AI clients"""
     
@@ -696,11 +970,17 @@ class MainWindow(QMainWindow):
         
         main_layout.addLayout(toolbar)
 
-        # Split View
+        # Split View - 3 Columns
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setStretchFactor(0, 35)  # Column 1: 35%
+        splitter.setStretchFactor(1, 30)  # Column 2: 30%
+        splitter.setStretchFactor(2, 35)  # Column 3: 35%
         
-        # LEFT: Servers
-        grp_srv = QGroupBox("1. Select Context Engines (Servers)")
+        # COLUMN 1: Servers
+        col1_panel = QWidget()
+        col1_layout = QVBoxLayout(col1_panel)
+        
+        grp_srv = QGroupBox("1. MCP Servers")
         grp_srv.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
         v_srv = QVBoxLayout()
         
@@ -708,8 +988,8 @@ class MainWindow(QMainWindow):
         scroll_srv.setWidgetResizable(True)
         scroll_srv.setFrameShape(QFrame.Shape.NoFrame)
         
-        wid_srv = QWidget()
-        lay_srv = QVBoxLayout(wid_srv)
+        self.wid_srv = QWidget()
+        lay_srv = QVBoxLayout(self.wid_srv)
         lay_srv.setSpacing(10)
         
         for k, v in AVAILABLE_SERVERS.items():
@@ -742,40 +1022,23 @@ class MainWindow(QMainWindow):
             lay_srv.addWidget(box)
             
         lay_srv.addStretch()
-        scroll_srv.setWidget(wid_srv)
+        scroll_srv.setWidget(self.wid_srv)
         v_srv.addWidget(scroll_srv)
         grp_srv.setLayout(v_srv)
-        splitter.addWidget(grp_srv)
-
-        # RIGHT: Clients
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
+        col1_layout.addWidget(grp_srv)
         
-        grp_cli = QGroupBox("2. Target Software (Clients)")
-        grp_cli.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        v_cli = QVBoxLayout()
+        btn_browse_servers = QPushButton("Browse Marketplace")
+        btn_browse_servers.setStyleSheet("background-color: #6f42c1; color: white;")
+        btn_browse_servers.clicked.connect(lambda: self.show_mcp_market_browser(tab='servers'))
+        col1_layout.addWidget(btn_browse_servers)
         
-        scroll_cli = QScrollArea()
-        scroll_cli.setWidgetResizable(True)
-        scroll_cli.setFrameShape(QFrame.Shape.NoFrame)
+        splitter.addWidget(col1_panel)
         
-        wid_cli = QWidget()
-        lay_cli = QVBoxLayout(wid_cli)
-        lay_cli.setSpacing(10)
-
-        for k, v in SUPPORTED_CLIENTS.items():
-            cb = QCheckBox(v['name'])
-            cb.setFont(QFont("Segoe UI", 11))
-            self.client_checkboxes[k] = cb
-            lay_cli.addWidget(cb)
-            
-        lay_cli.addStretch()
-        scroll_cli.setWidget(wid_cli)
-        v_cli.addWidget(scroll_cli)
-        grp_cli.setLayout(v_cli)
-        right_layout.addWidget(grp_cli)
+        # COLUMN 2: Skills
+        col2_panel = QWidget()
+        col2_layout = QVBoxLayout(col2_panel)
         
-        grp_skills = QGroupBox("3. Select Skills (Optional)")
+        grp_skills = QGroupBox("2. Skills")
         grp_skills.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
         v_skills = QVBoxLayout()
         
@@ -811,37 +1074,77 @@ class MainWindow(QMainWindow):
         scroll_skills.setWidget(wid_skills)
         v_skills.addWidget(scroll_skills)
         grp_skills.setLayout(v_skills)
-        right_layout.addWidget(grp_skills)
+        col2_layout.addWidget(grp_skills)
         
-        # Buttons
+        btn_browse_skills = QPushButton("Browse Marketplace")
+        btn_browse_skills.setStyleSheet("background-color: #6f42c1; color: white;")
+        btn_browse_skills.clicked.connect(lambda: self.show_mcp_market_browser(tab='skills'))
+        col2_layout.addWidget(btn_browse_skills)
+        
+        splitter.addWidget(col2_panel)
+        
+        # COLUMN 3: Clients + Actions
+        col3_panel = QWidget()
+        col3_layout = QVBoxLayout(col3_panel)
+        
+        grp_cli = QGroupBox("3. Target Clients")
+        grp_cli.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        v_cli = QVBoxLayout()
+        
+        scroll_cli = QScrollArea()
+        scroll_cli.setWidgetResizable(True)
+        scroll_cli.setFrameShape(QFrame.Shape.NoFrame)
+        
+        wid_cli = QWidget()
+        lay_cli = QVBoxLayout(wid_cli)
+        lay_cli.setSpacing(10)
+
+        for k, v in SUPPORTED_CLIENTS.items():
+            cb = QCheckBox(v['name'])
+            cb.setFont(QFont("Segoe UI", 11))
+            self.client_checkboxes[k] = cb
+            lay_cli.addWidget(cb)
+            
+        lay_cli.addStretch()
+        scroll_cli.setWidget(wid_cli)
+        v_cli.addWidget(scroll_cli)
+        grp_cli.setLayout(v_cli)
+        col3_layout.addWidget(grp_cli)
+        
+        btn_browse_clients = QPushButton("Browse Marketplace")
+        btn_browse_clients.setStyleSheet("background-color: #6f42c1; color: white;")
+        btn_browse_clients.clicked.connect(lambda: self.show_mcp_market_browser(tab='both'))
+        col3_layout.addWidget(btn_browse_clients)
+        
+        # Action Buttons
         btn_preview = QPushButton("Preview Configuration")
         btn_preview.clicked.connect(self.show_preview)
+        col3_layout.addWidget(btn_preview)
         
         btn_dry_run = QPushButton("Dry Run")
         btn_dry_run.clicked.connect(self.start_dry_run)
+        col3_layout.addWidget(btn_dry_run)
         
         btn_rollback = QPushButton("Rollback (Restore Last Backup)")
         btn_rollback.clicked.connect(self.rollback_config)
+        col3_layout.addWidget(btn_rollback)
         
         btn_check = QPushButton("Detect Installed Clients")
         btn_check.clicked.connect(self.detect_installed_clients)
+        col3_layout.addWidget(btn_check)
         
-        right_layout.addWidget(btn_preview)
-        right_layout.addWidget(btn_dry_run)
-        right_layout.addWidget(btn_rollback)
-        right_layout.addWidget(btn_check)
         btn_install_deps = QPushButton("Install Missing Dependencies")
         btn_install_deps.clicked.connect(self.install_missing_dependencies)
-        right_layout.addWidget(btn_install_deps)
+        col3_layout.addWidget(btn_install_deps)
         
         btn_install_skills = QPushButton("Install Selected Skills")
         btn_install_skills.setStyleSheet("background-color: #28a745; color: white;")
         btn_install_skills.clicked.connect(self.install_skills)
-        right_layout.addWidget(btn_install_skills)
+        col3_layout.addWidget(btn_install_skills)
         
-        right_layout.addStretch()
+        col3_layout.addStretch()
         
-        splitter.addWidget(right_panel)
+        splitter.addWidget(col3_panel)
         main_layout.addWidget(splitter)
 
         # Progress Bar
@@ -931,7 +1234,35 @@ class MainWindow(QMainWindow):
                 "details": "<b>Custom Server</b>"
             }
             
-            self.server_checkboxes[new_id] = None
+            # Create UI elements for custom server
+            box = QGroupBox()
+            box.setStyleSheet("QGroupBox { border: 1px solid #444; border-radius: 5px; margin-top: 5px; }")
+            box_l = QVBoxLayout()
+            
+            cb = QCheckBox(f"{data['name']}")
+            cb.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            self.server_checkboxes[new_id] = cb
+            cb.stateChanged.connect(lambda state, id=new_id: self.update_status(id, state))
+            
+            req_lbl = QLabel(f"Requires: {data['req']}")
+            req_lbl.setStyleSheet("color: #AAA; font-weight: bold; font-size: 10px;")
+            
+            status_lbl = QLabel("Status: Unknown")
+            status_lbl.setStyleSheet("color: #888; font-size: 9px;")
+            self.server_status[new_id] = status_lbl
+            
+            desc = QLabel("<b>Custom Server</b>")
+            desc.setWordWrap(True)
+            desc.setStyleSheet("color: #CCC; margin-top: 5px;")
+            
+            box_l.addWidget(cb)
+            box_l.addWidget(req_lbl)
+            box_l.addWidget(status_lbl)
+            box_l.addWidget(desc)
+            box.setLayout(box_l)
+            
+            # Add to the scroll area layout (before the stretch)
+            self.wid_srv.layout().insertWidget(self.wid_srv.layout().count() - 1, box)
             
             QMessageBox.information(self, "Success", f"Custom server '{data['name']}' added!")
             self.log(f"[+] Added custom server: {data['name']}")
@@ -1060,7 +1391,7 @@ class MainWindow(QMainWindow):
 
     def install_skills(self):
         sel_clients = [k for k, cb in self.client_checkboxes.items() if cb.isChecked()]
-        sel_skills = [k for k, cb in self.skill_checkboxes.items() if cb.isChecked()]
+        sel_skills = [k for k, cb in self.skill_checkboxes.items() if cb is not None and cb.isChecked()]
         
         if not sel_clients:
             QMessageBox.warning(self, "No Clients Selected", "Please select at least one target client software.")
@@ -1132,6 +1463,130 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"An error occurred: {e}")
         finally:
             skills_manager.cleanup()
+
+    def show_mcp_market_browser(self, tab='both'):
+        dialog = MCPMarketBrowserDialog(self, default_tab=tab)
+        if dialog.exec():
+            selected_clients = dialog.get_selected_clients()
+            selected_servers = dialog.get_selected_servers()
+            selected_skills = dialog.get_selected_skills()
+            
+            if not selected_clients:
+                QMessageBox.warning(self, "No Clients", "Please select at least one target client.")
+                return
+            
+            if not selected_servers and not selected_skills:
+                QMessageBox.warning(self, "No Selection", "Please select at least one server or skill to install.")
+                return
+            
+            self.log("[*] Installing from MCP Market...")
+            
+            # Install servers
+            for server in selected_servers:
+                self.log(f"    Installing server: {server['name']}")
+                for client_id in selected_clients:
+                    self.install_mcp_market_server(server, client_id)
+            
+            # Install skills
+            for skill in selected_skills:
+                self.log(f"    Installing skill: {skill['name']}")
+                for client_id in selected_clients:
+                    self.install_mcp_market_skill(skill, client_id)
+            
+            QMessageBox.information(self, "Success", 
+                f"Installed {len(selected_servers)} server(s) and {len(selected_skills)} skill(s)")
+    
+    def install_mcp_market_server(self, server, client_id):
+        """Install a server from MCP Market to a client"""
+        try:
+            client = SUPPORTED_CLIENTS.get(client_id)
+            if not client:
+                return False
+            
+            # Parse the command to get package name
+            cmd = server.get('command', '')
+            if not cmd:
+                return False
+            
+            # Get config path
+            config_paths = client.get('paths', [])
+            config_path = None
+            for p in config_paths:
+                expanded = os.path.expanduser(p.replace("~", os.path.expanduser("~")))
+                if os.path.exists(os.path.dirname(expanded)):
+                    config_path = expanded
+                    break
+            
+            if not config_path:
+                return False
+            
+            # Read existing config
+            config = {}
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+            
+            if 'mcpServers' not in config:
+                config['mcpServers'] = {}
+            
+            # Add server
+            server_name = server['name'].lower().replace(' ', '-')
+            config['mcpServers'][server_name] = {
+                "command": cmd,
+                "args": server.get('args', []),
+                "env": {}
+            }
+            
+            # Write config
+            os.makedirs(os.path.dirname(config_path), exist_ok=True)
+            with open(config_path, 'w') as f:
+                json.dump(config, f, indent=2)
+            
+            self.log(f"    [+] Added {server['name']} to {client['name']}")
+            return True
+        except Exception as e:
+            self.log(f"    [!] Failed to install {server['name']}: {e}")
+            return False
+    
+    def install_mcp_market_skill(self, skill, client_id):
+        """Install a skill from MCP Market to a client"""
+        try:
+            client = SUPPORTED_CLIENTS.get(client_id)
+            if not client or not client.get('skills_path'):
+                return False
+            
+            skills_path = os.path.expanduser(client['skills_path'])
+            os.makedirs(skills_path, exist_ok=True)
+            
+            skill_name = skill['name'].lower().replace(' ', '-')
+            skill_dest = os.path.join(skills_path, skill_name)
+            
+            if os.path.exists(skill_dest):
+                self.log(f"    [*] Skill {skill['name']} already exists")
+                return True
+            
+            # Clone the repo
+            repo = skill.get('repo', '')
+            if not repo:
+                return False
+            
+            self.log(f"    [*] Cloning skill from {repo}...")
+            result = subprocess.run(
+                ['git', 'clone', '--depth', '1', f'https://github.com/{repo}.git', skill_dest],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            if result.returncode == 0:
+                self.log(f"    [+] Added skill {skill['name']} to {client['name']}")
+                return True
+            else:
+                self.log(f"    [!] Failed to clone skill: {result.stderr}")
+                return False
+        except Exception as e:
+            self.log(f"    [!] Failed to install skill {skill['name']}: {e}")
+            return False
 
     def rollback_config(self):
         backups = []
